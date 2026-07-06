@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Stadium configuration — read-only for clients
+    match /stadiums/{stadiumId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.auth.token.admin == true;
+      allow update, delete: if false; // Immutable once created
+    }
+
+    // Live crowd data — append-only
+    match /crowd_data/{documentId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false; // Append-only, no modification
+    }
+
+    // Match schedules — admin-only write
+    match /matches/{matchId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+                            && request.auth.token.admin == true;
+      allow delete: if false; // Never delete match records
+    }
+
+    // Facility status — operators can update
+    match /facilities/{facilityId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+                            && request.auth.token.operator == true;
+      allow delete: if false;
+    }
+
+    // Emergency alerts — admin-only
+    match /alerts/{alertId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.auth.token.admin == true;
+      allow update, delete: if false; // Alerts are immutable
+    }
+
+    // Default: deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
