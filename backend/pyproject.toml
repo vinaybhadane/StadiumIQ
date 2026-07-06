@@ -25,6 +25,9 @@ exclude_lines = [
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+line-ending = "lf"
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "PLC", "B", "C4", "SIM"]
 ignore = ["E501", "COM812"]
