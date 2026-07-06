@@ -1,6 +1,7 @@
 """Match scheduling and tournament management routes."""
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,13 +18,15 @@ from app.models.match import (
 )
 from app.services import bigquery_service, pubsub_service
 from app.services.gemini_service import GeminiUnavailableError, generate_schedule_optimization
-from app.stadium.scheduler import optimize_schedule
+from app.stadium.scheduler import detect_conflicts, optimize_schedule
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
 
 # In-memory store for demo
-_matches: list[Match] = [
-    Match(
+_matches_db: dict[str, Match] = {
+    "M001": Match(
         match_id="M001",
         home_team=Team(team_id="T1", name="Metropolis FC", ranking=3, group="A"),
         away_team=Team(team_id="T2", name="Gotham United", ranking=5, group="A"),
@@ -32,7 +35,7 @@ _matches: list[Match] = [
         status=MatchStatus.COMPLETED,
         statistics=MatchStatistics(home_score=2, away_score=1, attendance=55000),
     ),
-    Match(
+    "M002": Match(
         match_id="M002",
         home_team=Team(team_id="T3", name="Star City Rovers", ranking=2, group="A"),
         away_team=Team(team_id="T4", name="Central City FC", ranking=7, group="A"),
@@ -40,7 +43,7 @@ _matches: list[Match] = [
         scheduled_time=datetime(2026, 7, 12, 18, 0, tzinfo=UTC),
         status=MatchStatus.SCHEDULED,
     ),
-    Match(
+    "M003": Match(
         match_id="M003",
         home_team=Team(team_id="T1", name="Metropolis FC", ranking=3, group="A"),
         away_team=Team(team_id="T3", name="Star City Rovers", ranking=2, group="A"),
@@ -51,21 +54,21 @@ _matches: list[Match] = [
             home_score=1, away_score=1, home_possession=55.3, away_possession=44.7, attendance=58000
         ),
     ),
-]
+}
 
 
 @router.get("", response_model=list[Match])
 async def get_matches() -> list[Match]:
     """Get all matches in the tournament."""
-    return _matches
+    return list(_matches_db.values())
 
 
 @router.get("/{match_id}", response_model=Match)
 async def get_match(match_id: str) -> Match:
     """Get a specific match by ID."""
-    for match in _matches:
-        if match.match_id == match_id:
-            return match
+    match = _matches_db.get(match_id)
+    if match is not None:
+        return match
 
     raise HTTPException(status_code=404, detail=f"Match {match_id} not found")
 
@@ -93,20 +96,45 @@ async def schedule_matches(
             f"{len(body.stadium_ids)} venues from {body.start_date} to "
             f"{body.end_date}. Rest days: {body.rest_days_between_matches}."
         )
-        await generate_schedule_optimization(prompt)
-        source = "gemini"
-        # Parse AI result into matches (simplified)
-    except GeminiUnavailableError:
-        pass  # Fall through to rules engine
-
-    # Rule-based scheduling
-    matches, conflicts = optimize_schedule(
-        teams=body.teams,
-        stadium_ids=body.stadium_ids,
-        start_date=body.start_date,
-        end_date=body.end_date,
-        rest_days=body.rest_days_between_matches,
-    )
+        ai_result = await generate_schedule_optimization(prompt)
+        matches_data = ai_result.get("matches") or ai_result.get("schedule")
+        if isinstance(matches_data, list) and len(matches_data) > 0:
+            parsed_matches = []
+            team_map = {t.team_id: t for t in body.teams}
+            for idx, m_data in enumerate(matches_data):
+                home_t = team_map.get(m_data.get("home_team_id", ""))
+                away_t = team_map.get(m_data.get("away_team_id", ""))
+                if home_t and away_t:
+                    scheduled_time_str = m_data.get("scheduled_time", "")
+                    scheduled_time = datetime.fromisoformat(
+                        scheduled_time_str.replace("Z", "+00:00")
+                    )
+                    parsed_matches.append(
+                        Match(
+                            match_id=m_data.get("match_id", f"M{idx + 1:03d}"),
+                            home_team=home_t,
+                            away_team=away_t,
+                            stadium_id=m_data.get("stadium_id", body.stadium_ids[0]),
+                            scheduled_time=scheduled_time,
+                        )
+                    )
+            if parsed_matches:
+                matches = parsed_matches
+                conflicts = detect_conflicts(matches)
+                source = "gemini"
+            else:
+                raise GeminiUnavailableError("No valid matches parsed from Gemini output")
+        else:
+            raise GeminiUnavailableError("Gemini output matches list was empty or invalid")
+    except Exception as exc:
+        logger.warning("Failed to parse Gemini schedule, falling back to rules engine: %s", exc)
+        matches, conflicts = optimize_schedule(
+            teams=body.teams,
+            stadium_ids=body.stadium_ids,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            rest_days=body.rest_days_between_matches,
+        )
 
     # Fire-and-forget: log and notify
     asyncio.create_task(

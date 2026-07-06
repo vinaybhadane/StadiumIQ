@@ -62,6 +62,16 @@ const App: React.FC = () => {
     fetchStandings();
     fetchLatestInsights();
     fetchSurgePrediction();
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchStadium();
+        fetchLatestInsights();
+        fetchSurgePrediction();
+      }
+    }, 15000); // 15 seconds polling interval
+
+    return () => clearInterval(intervalId);
   }, [fetchStadium, fetchMatches, fetchStandings, fetchLatestInsights, fetchSurgePrediction]);
 
   return (

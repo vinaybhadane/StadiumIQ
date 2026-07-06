@@ -14,6 +14,9 @@ dist/
 build/
 coverage/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
+frontend/node_modules
+backend/tests
+frontend/tests
+.agents
+.git
+.github

@@ -180,7 +180,17 @@ async def test_schedule_matches_gemini_success(client: AsyncClient):
 
     original = matches_route.generate_schedule_optimization
     matches_route.generate_schedule_optimization = AsyncMock(
-        return_value={"schedule": [], "conflicts": [], "optimization_notes": "Optimized by Gemini"}
+        return_value={
+            "matches": [
+                {
+                    "match_id": "M001",
+                    "home_team_id": "T1",
+                    "away_team_id": "T2",
+                    "stadium_id": "STD-001",
+                    "scheduled_time": "2026-07-10T16:00:00Z",
+                }
+            ]
+        }
     )
 
     try:

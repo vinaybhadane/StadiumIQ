@@ -4,17 +4,25 @@ All functions are pure (zero I/O, zero side effects) for easy testing.
 Handles conflict detection and time slot optimization.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from typing import Final
 
 from app.models.match import Match, MatchStatus, Team, WeatherCondition
+
+# Constants
+STADIUM_CONFLICT_WINDOW_SECONDS: Final[int] = 4 * 3600  # 4 hours
+MAX_SLOT_SEARCH_OFFSET: Final[int] = 5
+DEFAULT_SLOT_HOURS_1: Final[list[int]] = [16]
+DEFAULT_SLOT_HOURS_2: Final[list[int]] = [14, 18]
+DEFAULT_SLOT_HOURS_3: Final[list[int]] = [12, 16, 20]
 
 
 def detect_conflicts(matches: list[Match]) -> list[str]:
     """Detect scheduling conflicts in a list of matches.
 
     Conflicts include:
-    - Same team playing two matches too close together
-    - Same stadium double-booked
+    - Same team playing two matches too close together (on the same day)
+    - Same stadium double-booked (less than 4 hours apart)
     - Overlapping broadcast windows
 
     Args:
@@ -25,32 +33,54 @@ def detect_conflicts(matches: list[Match]) -> list[str]:
     """
     conflicts: list[str] = []
 
-    for i, match_a in enumerate(matches):
-        for match_b in matches[i + 1 :]:
-            # Same stadium within 4 hours
-            if match_a.stadium_id == match_b.stadium_id:
-                time_diff = abs((match_a.scheduled_time - match_b.scheduled_time).total_seconds())
-                if time_diff < 4 * 3600:  # 4 hours
-                    conflicts.append(
-                        f"Stadium {match_a.stadium_id} double-booked: "
-                        f"{match_a.match_id} and {match_b.match_id} "
-                        f"are only {time_diff / 3600:.1f}h apart"
-                    )
+    # 1. Same stadium within 4 hours (O(n log n) with bucketing & sorting)
+    stadium_matches: dict[str, list[Match]] = {}
+    for match in matches:
+        stadium_matches.setdefault(match.stadium_id, []).append(match)
 
-            # Same team playing on same day
-            teams_a = {match_a.home_team.team_id, match_a.away_team.team_id}
-            teams_b = {match_b.home_team.team_id, match_b.away_team.team_id}
-            shared_teams = teams_a & teams_b
+    for stadium_id, s_matches in stadium_matches.items():
+        # Sort matches by scheduled time to check adjacent ones
+        s_matches = sorted(s_matches, key=lambda m: m.scheduled_time)
+        for i in range(len(s_matches) - 1):
+            match_a = s_matches[i]
+            match_b = s_matches[i + 1]
+            time_diff = abs((match_a.scheduled_time - match_b.scheduled_time).total_seconds())
+            if time_diff < STADIUM_CONFLICT_WINDOW_SECONDS:
+                conflicts.append(
+                    f"Stadium {stadium_id} double-booked: "
+                    f"{match_a.match_id} and {match_b.match_id} "
+                    f"are only {time_diff / 3600:.1f}h apart"
+                )
 
-            if shared_teams:
-                is_same_day = match_a.scheduled_time.date() == match_b.scheduled_time.date()
-                if is_same_day:
-                    for team_id in shared_teams:
-                        conflicts.append(
-                            f"Team {team_id} scheduled for two matches on "
-                            f"the same day: {match_a.match_id} and "
-                            f"{match_b.match_id}"
-                        )
+    # 2. Same team playing on same day (O(n) day bucketing)
+    team_matches: dict[str, list[Match]] = {}
+    for match in matches:
+        team_matches.setdefault(match.home_team.team_id, []).append(match)
+        team_matches.setdefault(match.away_team.team_id, []).append(match)
+
+    for team_id, t_matches in team_matches.items():
+        # Group by day
+        day_matches: dict[date, list[Match]] = {}
+        for match in t_matches:
+            day = match.scheduled_time.date()
+            day_matches.setdefault(day, []).append(match)
+
+        for _day, d_matches in day_matches.items():
+            if len(d_matches) > 1:
+                # Compare each pair of matches to generate conflicts
+                seen_pairs = set()
+                for i in range(len(d_matches)):
+                    for j in range(i + 1, len(d_matches)):
+                        match_a = d_matches[i]
+                        match_b = d_matches[j]
+                        pair = tuple(sorted([match_a.match_id, match_b.match_id]))
+                        if pair not in seen_pairs:
+                            seen_pairs.add(pair)
+                            conflicts.append(
+                                f"Team {team_id} scheduled for two matches on "
+                                f"the same day: {match_a.match_id} and "
+                                f"{match_b.match_id}"
+                            )
 
     return conflicts
 
@@ -117,9 +147,9 @@ def generate_time_slots(
     current_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Default slot times: afternoon and evening
-    slot_hours = [14, 18] if matches_per_day >= 2 else [16]
+    slot_hours = DEFAULT_SLOT_HOURS_2 if matches_per_day >= 2 else DEFAULT_SLOT_HOURS_1
     if matches_per_day >= 3:
-        slot_hours = [12, 16, 20]
+        slot_hours = DEFAULT_SLOT_HOURS_3
 
     while current_date <= end_date:
         for hour in slot_hours[:matches_per_day]:
@@ -169,16 +199,32 @@ def optimize_schedule(
 
     slot_index = 0
 
+    # Index for fast O(1) rest days check: dict[team_id, list[datetime]]
+    team_schedules: dict[str, list[datetime]] = {team.team_id: [] for team in teams}
+
     for stadium_index, (home_team, away_team) in enumerate(matchups):
         if slot_index >= len(time_slots):
             break
 
-        # Find a slot where both teams have enough rest
+        # Find a slot where both teams have enough rest (O(k) where k is team matches, not O(n))
         found = False
-        for offset in range(min(5, len(time_slots) - slot_index)):
+        for offset in range(min(MAX_SLOT_SEARCH_OFFSET, len(time_slots) - slot_index)):
             candidate_slot = time_slots[slot_index + offset]
-            home_ok = check_rest_days(home_team.team_id, candidate_slot, matches, rest_days)
-            away_ok = check_rest_days(away_team.team_id, candidate_slot, matches, rest_days)
+
+            # Check home team
+            home_ok = True
+            for scheduled_time in team_schedules[home_team.team_id]:
+                if abs((candidate_slot - scheduled_time).days) < rest_days:
+                    home_ok = False
+                    break
+
+            # Check away team
+            away_ok = True
+            for scheduled_time in team_schedules[away_team.team_id]:
+                if abs((candidate_slot - scheduled_time).days) < rest_days:
+                    away_ok = False
+                    break
+
             if home_ok and away_ok:
                 slot_index += offset
                 found = True
@@ -187,14 +233,19 @@ def optimize_schedule(
         if not found:
             slot_index = min(slot_index + 1, len(time_slots) - 1)
 
+        match_time = time_slots[slot_index]
         match = Match(
             match_id=f"M{len(matches) + 1:03d}",
             home_team=home_team,
             away_team=away_team,
             stadium_id=stadium_ids[stadium_index % len(stadium_ids)],
-            scheduled_time=time_slots[slot_index],
+            scheduled_time=match_time,
         )
         matches.append(match)
+
+        # Update the index
+        team_schedules[home_team.team_id].append(match_time)
+        team_schedules[away_team.team_id].append(match_time)
 
         slot_index += 1
 

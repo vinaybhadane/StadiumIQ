@@ -1,13 +1,8 @@
-"""Gemini AI service via Vertex AI.
-
-Lazy initialization — the Vertex AI client is only created on first call.
-Provides graceful degradation: when Gemini is unavailable, raises
-GeminiUnavailableError so the caller can fall back to rule-based logic.
-"""
-
+import functools
 import json
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
@@ -39,6 +34,28 @@ def _get_model() -> Any:
         )
         _model = GenerativeModel(settings.gemini_model)
     return _model
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def wrap_gemini_errors(action: str) -> Callable[[F], F]:
+    """Decorator to wrap Gemini errors in a consistent GeminiUnavailableError."""
+
+    def decorator(fn: F) -> F:
+        @functools.wraps(fn)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await fn(*args, **kwargs)
+            except GeminiUnavailableError:
+                raise
+            except Exception as exc:
+                logger.warning("Gemini %s failed: %s", action, exc)
+                raise GeminiUnavailableError(f"Gemini {action} failed: {exc}") from exc
+
+        return cast(F, wrapper)
+
+    return decorator
 
 
 async def generate_insight(prompt: str) -> dict[str, Any]:
@@ -93,6 +110,7 @@ async def generate_schedule_optimization(prompt: str) -> dict[str, Any]:
     return await generate_insight(f"Generate an optimized match schedule. {prompt}")
 
 
+@wrap_gemini_errors("briefing")
 async def generate_tactical_briefing(prompt: str) -> str:
     """Generate a pre-match tactical briefing using Gemini.
 
@@ -105,23 +123,17 @@ async def generate_tactical_briefing(prompt: str) -> str:
     Raises:
         GeminiUnavailableError: If Gemini cannot generate a response.
     """
-    try:
-        model = _get_model()
-        sanitized = sanitize_for_prompt(prompt, max_length=500)
+    model = _get_model()
+    sanitized = sanitize_for_prompt(prompt, max_length=500)
 
-        response = model.generate_content(
-            f"You are StadiumIQ. Generate a concise pre-match tactical briefing.\n\n{sanitized}"
-        )
+    response = model.generate_content(
+        f"You are StadiumIQ. Generate a concise pre-match tactical briefing.\n\n{sanitized}"
+    )
 
-        return str(response.text)
-
-    except GeminiUnavailableError:
-        raise
-    except Exception as exc:
-        logger.warning("Gemini briefing failed: %s", exc)
-        raise GeminiUnavailableError(f"Gemini briefing failed: {exc}") from exc
+    return str(response.text)
 
 
+@wrap_gemini_errors("summary")
 async def generate_tournament_summary(prompt: str) -> str:
     """Generate a tournament summary report using Gemini.
 
@@ -129,28 +141,22 @@ async def generate_tournament_summary(prompt: str) -> str:
         prompt: Tournament data prompt (will be sanitized).
 
     Returns:
-        Summary report text.
+      Summary report text.
 
     Raises:
         GeminiUnavailableError: If Gemini cannot generate a response.
     """
-    try:
-        model = _get_model()
-        sanitized = sanitize_for_prompt(prompt, max_length=500)
+    model = _get_model()
+    sanitized = sanitize_for_prompt(prompt, max_length=500)
 
-        response = model.generate_content(
-            f"You are StadiumIQ. Generate a comprehensive tournament summary.\n\n{sanitized}"
-        )
+    response = model.generate_content(
+        f"You are StadiumIQ. Generate a comprehensive tournament summary.\n\n{sanitized}"
+    )
 
-        return str(response.text)
-
-    except GeminiUnavailableError:
-        raise
-    except Exception as exc:
-        logger.warning("Gemini summary failed: %s", exc)
-        raise GeminiUnavailableError(f"Gemini summary failed: {exc}") from exc
+    return str(response.text)
 
 
+@wrap_gemini_errors("navigation directions")
 async def generate_navigation_directions(
     current_zone: str,
     destination_type: str,
@@ -163,22 +169,17 @@ async def generate_navigation_directions(
         destination_type: Target category.
         language: ISO language code.
     """
-    try:
-        model = _get_model()
-        prompt = (
-            f"Given stadium zone map and current crowd density, "
-            f"generate step-by-step natural language navigation from "
-            f"Zone {current_zone} to {destination_type} in {language}."
-        )
-        response = model.generate_content(prompt)
-        return str(response.text)
-    except GeminiUnavailableError:
-        raise
-    except Exception as exc:
-        logger.warning("Gemini navigation directions failed: %s", exc)
-        raise GeminiUnavailableError(f"Gemini navigation directions failed: {exc}") from exc
+    model = _get_model()
+    prompt = (
+        f"Given stadium zone map and current crowd density, "
+        f"generate step-by-step natural language navigation from "
+        f"Zone {current_zone} to {destination_type} in {language}."
+    )
+    response = model.generate_content(prompt)
+    return str(response.text)
 
 
+@wrap_gemini_errors("assistance")
 async def generate_multilingual_assistance(
     query: str,
     preferred_language: str,
@@ -191,15 +192,10 @@ async def generate_multilingual_assistance(
         preferred_language: Output language.
         persona_type: Target audience.
     """
-    try:
-        prompt = (
-            f"You are a multilingual stadium assistant. Persona: {persona_type}. "
-            f"Respond in {preferred_language}. Query: {query}. "
-            f'Return JSON format: {{"response_text": "...", "detected_language": "..."}}'
-        )
-        return await generate_insight(prompt)
-    except GeminiUnavailableError:
-        raise
-    except Exception as exc:
-        logger.warning("Gemini assistance failed: %s", exc)
-        raise GeminiUnavailableError(f"Gemini assistance failed: {exc}") from exc
+    sanitized_query = sanitize_for_prompt(query, max_length=500)
+    prompt = (
+        f"You are a multilingual stadium assistant. Persona: {persona_type}. "
+        f"Respond in {preferred_language}. Query: {sanitized_query}. "
+        f'Return JSON format: {{"response_text": "...", "detected_language": "..."}}'
+    )
+    return await generate_insight(prompt)

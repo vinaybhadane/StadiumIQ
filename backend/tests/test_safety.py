@@ -1,5 +1,7 @@
 """Tests for PII safety — redaction verified."""
 
+import pytest
+
 from app.core.safety import redact_pii, sanitize_for_prompt
 
 
@@ -90,3 +92,31 @@ class TestSanitizeForPrompt:
         assert "नमस्ते" in result
         assert "Hola" in result
         assert "مرحبا" in result
+
+
+class TestGeminiServicePIISafety:
+    """Tests verifying prompt-level sanitization inside the Gemini service."""
+
+    @pytest.mark.asyncio
+    async def test_generate_multilingual_assistance_sanitizes_pii(self):
+        from unittest.mock import patch
+
+        with patch("app.services.gemini_service.generate_insight") as mock_insight:
+            mock_insight.return_value = {"response_text": "Clean", "detected_language": "en"}
+            from app.services.gemini_service import generate_multilingual_assistance
+
+            # Call with PII and control characters
+            await generate_multilingual_assistance(
+                query="My email is test@test.com\x00 and phone is 1234567890",
+                preferred_language="es",
+                persona_type="fan",
+            )
+
+            # Verify generate_insight was called with redacted and sanitized prompt
+            mock_insight.assert_called_once()
+            called_prompt = mock_insight.call_args[0][0]
+            assert "[EMAIL_REDACTED]" in called_prompt
+            assert "[PHONE_REDACTED]" in called_prompt
+            assert "\x00" not in called_prompt
+            assert "test@test.com" not in called_prompt
+            assert "1234567890" not in called_prompt
