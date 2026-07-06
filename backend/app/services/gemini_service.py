@@ -110,7 +110,7 @@ async def generate_tactical_briefing(prompt: str) -> str:
         sanitized = sanitize_for_prompt(prompt, max_length=500)
 
         response = model.generate_content(
-            f"You are StadiumIQ. Generate a concise pre-match tactical briefing.\n\n" f"{sanitized}"
+            f"You are StadiumIQ. Generate a concise pre-match tactical briefing.\n\n{sanitized}"
         )
 
         return str(response.text)
@@ -139,7 +139,7 @@ async def generate_tournament_summary(prompt: str) -> str:
         sanitized = sanitize_for_prompt(prompt, max_length=500)
 
         response = model.generate_content(
-            f"You are StadiumIQ. Generate a comprehensive tournament summary.\n\n" f"{sanitized}"
+            f"You are StadiumIQ. Generate a comprehensive tournament summary.\n\n{sanitized}"
         )
 
         return str(response.text)
