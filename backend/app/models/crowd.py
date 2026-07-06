@@ -1,12 +1,12 @@
 """Pydantic v2 models for crowd management and surge prediction."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     """Crowd surge risk classification."""
 
     GREEN = "green"

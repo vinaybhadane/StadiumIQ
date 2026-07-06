@@ -51,7 +51,7 @@ def calculate_gate_distribution(
     if total_capacity == 0:
         # Equal distribution if all capacities are zero
         equal_share = total_expected // len(gate_capacities)
-        return {gate_id: equal_share for gate_id in gate_capacities}
+        return dict.fromkeys(gate_capacities, equal_share)
 
     distribution: dict[str, int] = {}
     allocated = 0

@@ -1,12 +1,12 @@
 """Pydantic v2 models for AI-generated insights and analytics."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class InsightCategory(str, Enum):
+class InsightCategory(StrEnum):
     """Categories of AI-generated insights."""
 
     CROWD_MANAGEMENT = "crowd_management"
@@ -17,7 +17,7 @@ class InsightCategory(str, Enum):
     REVENUE = "revenue"
 
 
-class InsightPriority(str, Enum):
+class InsightPriority(StrEnum):
     """Insight urgency classification."""
 
     LOW = "low"

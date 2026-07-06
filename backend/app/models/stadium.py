@@ -1,11 +1,11 @@
 """Pydantic v2 models for stadium configuration and zones."""
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class ZoneType(str, Enum):
+class ZoneType(StrEnum):
     """Stadium zone classification."""
 
     GENERAL = "general"
@@ -15,7 +15,7 @@ class ZoneType(str, Enum):
     ACCESSIBLE = "accessible"
 
 
-class GateStatus(str, Enum):
+class GateStatus(StrEnum):
     """Gate operational status."""
 
     OPEN = "open"

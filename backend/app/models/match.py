@@ -1,12 +1,12 @@
 """Pydantic v2 models for match scheduling and tournament standings."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class MatchStatus(str, Enum):
+class MatchStatus(StrEnum):
     """Match lifecycle status."""
 
     SCHEDULED = "scheduled"
@@ -17,7 +17,7 @@ class MatchStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class WeatherCondition(str, Enum):
+class WeatherCondition(StrEnum):
     """Weather conditions that affect match scheduling."""
 
     CLEAR = "clear"
