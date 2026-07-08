@@ -11,13 +11,13 @@ describe('getAmenities', () => {
   it('filters facilities by category', () => {
     const accessible = getAmenities('accessibility');
     expect(accessible.length).toBeGreaterThan(0);
-    expect(accessible.every((facility: any) => facility.category === 'accessibility')).toBe(true);
+    expect(accessible.every((facility: { category: string }) => facility.category === 'accessibility')).toBe(true);
   });
 
   it('returns an empty list for a category with no facilities rather than throwing', () => {
     // Every current category has entries; this guards the filter contract
     // itself using a category cast from the domain type.
-    expect(getAmenities('food').every((facility: any) => facility.category === 'food')).toBe(true);
+    expect(getAmenities('food').every((facility: { category: string }) => facility.category === 'food')).toBe(true);
   });
 });
 

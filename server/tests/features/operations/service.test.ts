@@ -51,7 +51,7 @@ describe('initializeData / captureSituation / progressSimulation', () => {
     await initializeData();
     await progressSimulation(() => 1);
     const snapshot = await captureSituation();
-    for (const zone of snapshot.zones as any[]) {
+    for (const zone of snapshot.zones as { densityPct: number }[]) {
       expect(zone.densityPct).toBeGreaterThanOrEqual(15);
       expect(zone.densityPct).toBeLessThanOrEqual(98);
     }
